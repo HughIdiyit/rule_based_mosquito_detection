@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 from time import perf_counter
+import math
 
 import librosa, librosa.display
 import scipy
@@ -17,7 +18,7 @@ def plot_correlation(correlation, no):
     plt.close()
 
 
-def is_periodic(correlation, distance):
+def is_periodic(correlation, distance, sr):
     """
     Determines whether a given correlation is (almost) periodic
     :param correlation: correlation values for each sample lag; np.array of floats
@@ -37,7 +38,12 @@ def is_periodic(correlation, distance):
     distances = np.diff(peaks[:-1])
 
     # Determine whether distances are roughly periodic
-    close = np.isclose(distances[0], distances, atol=10)  # Similarity of ca. 5-6% of samples between peaks
+    tolerance = math.ceil(sr//1000//10)
+    if tolerance > 1:
+        pass
+    else:
+        tolerance = 2
+    close = np.isclose(distances[0], distances, atol=tolerance)  # Similarity of ca. 5-6% of samples between peaks
     if np.bincount(close)[0] < close.shape[0] // 10:  # At least 90% periodic
         return True, distances[0]
 
@@ -67,13 +73,12 @@ def detection(filename, fmin, fmax, verify=False):
 
     # Store labels for mosquito presence in hot-one-encoding
     labels = np.zeros(shape=num_windows, dtype=int)
-
     for i, window in enumerate(range(num_windows)):
         # Autocorrelation
         window = audio[start:start+ms100_window]
         r = librosa.autocorrelate(window)
 
-        periodic, first_distance = is_periodic(r, sr//1000)
+        periodic, first_distance = is_periodic(r, sr//1000, sr)
         if periodic:
             # Pitch Detection
             T = (first_distance / sr)  # Calculate period in seconds
@@ -125,12 +130,15 @@ if __name__ == "__main__":
         logging.info(f"Finished in: {stop_time - start_time:.3f} seconds")
 
         try:
-            audio_concatenated = np.concatenate(audio_parts)
+            audio_concatenated = np.concatenate(audio_parts[6:])  # Slicing is done to cut out potential false positives on voice
             file_path = os.path.join(AUDIO_PATH, f"{name[:-4]}_autocut.wav")
             wav_write(file_path, audio_concatenated, sampling_rate)
             logging.info(f"Mosquito audio for {name[:-4]} saved to disk")
-        except ValueError:
-            logging.info(f"No mosquito found for {name[:-4]} saved to disk")
+        except:
+            logging.info(f"No mosquito found for {name[:-4]}")
 
-        np.save(f"data/labels/{name[:-4]}", audio_labels)
-        logging.info(f"Labels for {name[:-4]} saved to disk")
+        try:
+            np.save(f"data/labels/{name[:-4]}", audio_labels[6:])  # Slicing is done to cut out potential false positives on voice
+            logging.info(f"Labels for {name[:-4]} saved to disk")
+        except:
+            logging.info(f"Less than 0.6 seconds of audio for {name[:-4]}")
